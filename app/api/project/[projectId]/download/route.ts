@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { projectExists, readState, listEpisodes } from '@/lib/state'
+import { projectExists, readState } from '@/lib/state'
 import fs from 'fs/promises'
 import path from 'path'
 
