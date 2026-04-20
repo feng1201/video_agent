@@ -40,7 +40,7 @@ ${refs}
       const s = await readState(projectId)
       await updateState(projectId, {
         currentStep: 'episode',
-        completedSteps: [...new Set([...s.completedSteps, 'outline'])],
+        completedSteps: s.completedSteps.includes('outline') ? s.completedSteps : [...s.completedSteps, 'outline'],
       })
       callbacks.onFileSaved('episode-directory.md')
       callbacks.onDone()

@@ -20,7 +20,6 @@ export async function runEpisode(
   callbacks: StreamCallbacks & { onFileSaved: (f: string) => void }
 ): Promise<void> {
   const episodes = parseEpisodeRange(episode)
-  const state = await readState(projectId)
 
   for (const ep of episodes) {
     const allowed = await checkPaywall(projectId, ep)
@@ -80,7 +79,7 @@ ${refs}
           await writeProjectFile(projectId, filename, full)
           const s = await readState(projectId)
           await updateState(projectId, {
-            completedEpisodes: [...new Set([...s.completedEpisodes, ep])],
+            completedEpisodes: s.completedEpisodes.includes(ep) ? s.completedEpisodes : [...s.completedEpisodes, ep],
             completedSteps: s.completedSteps.includes('episode')
               ? s.completedSteps
               : [...s.completedSteps, 'episode'],

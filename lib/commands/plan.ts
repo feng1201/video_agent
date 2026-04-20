@@ -36,7 +36,7 @@ ${refs}
       const s = await readState(projectId)
       await updateState(projectId, {
         currentStep: 'characters',
-        completedSteps: [...new Set([...s.completedSteps, 'plan'])],
+        completedSteps: s.completedSteps.includes('plan') ? s.completedSteps : [...s.completedSteps, 'plan'],
       })
       callbacks.onFileSaved('creative-plan.md')
       callbacks.onDone()

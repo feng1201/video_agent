@@ -17,12 +17,12 @@ export async function POST(
   const { projectId, command } = params
 
   if (!(await projectExists(projectId))) {
-    return new Response(sseError('项目未找到'), { headers: SSE_HEADERS })
+    return new Response(sseError('项目未找到') as BodyInit, { headers: SSE_HEADERS })
   }
 
   const body = await request.json().catch(() => ({}))
 
-  const stream = new ReadableStream({
+  const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       const callbacks = {
         onChunk: (content: string) => controller.enqueue(sseChunk(content)),
@@ -56,5 +56,5 @@ export async function POST(
     },
   })
 
-  return new Response(stream, { headers: SSE_HEADERS })
+  return new Response(stream as BodyInit, { headers: SSE_HEADERS })
 }

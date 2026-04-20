@@ -60,7 +60,7 @@ ${refs}
         language: input.language,
         mode,
         currentStep: 'plan',
-        completedSteps: [...new Set([...state.completedSteps, 'start'])],
+        completedSteps: state.completedSteps.includes('start') ? state.completedSteps : [...state.completedSteps, 'start'],
       })
       callbacks.onFileSaved('.drama-state.json')
       callbacks.onDone()
