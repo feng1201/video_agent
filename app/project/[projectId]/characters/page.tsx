@@ -6,9 +6,36 @@ import StreamingText from '@/components/StreamingText'
 import { streamFromAPI } from '@/lib/useSSE'
 
 function extractMermaidCode(text: string): string | null {
-  // 支持多种格式：```mermaid、``` mermaid、前后有空格等
-  const match = text.match(/```\s*mermaid\s*\n([\s\S]*?)```/)
+  const match = text.match(/```\s*mermaid\s*\n?([\s\S]*?)```/)
   return match ? match[1].trim() : null
+}
+
+function sanitizeMermaid(code: string): string {
+  return code
+    .replace(/-\.{2,}->/g, '-.->') // -..-> 修正为 -.->
+    .replace(/==+x/g, '--x')        // ==x 修正为 --x
+    .replace(/==+>/g, '==>')         // 保留粗箭头 ==>
+    .replace(/<br\s*\/?>/gi, ' ')   // 移除 <br/> 标签
+}
+
+async function renderMermaid(code: string): Promise<string | null> {
+  try {
+    const { default: mermaid } = await import('mermaid')
+    mermaid.initialize({ startOnLoad: false, theme: 'default', securityLevel: 'loose' })
+    const id = 'mermaid-' + Date.now()
+    const { svg } = await mermaid.render(id, code)
+    return svg
+  } catch {
+    try {
+      const { default: mermaid } = await import('mermaid')
+      mermaid.initialize({ startOnLoad: false, theme: 'default', securityLevel: 'strict' })
+      const id = 'mermaid-fb-' + Date.now()
+      const { svg } = await mermaid.render(id, code)
+      return svg
+    } catch {
+      return null
+    }
+  }
 }
 
 export default function CharactersPage({ params }: { params: { projectId: string } }) {
@@ -23,31 +50,32 @@ export default function CharactersPage({ params }: { params: { projectId: string
   const mermaidContainerRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    fetch(`/api/project/${projectId}/state`).then(r => r.json()).then(s => {
+    fetch(`/api/project/${projectId}/state`).then(r => r.json()).then(async s => {
       setState(s)
-      if (s.completedSteps?.includes('characters')) setDone(true)
+      if (s.completedSteps?.includes('characters')) {
+        setDone(true)
+        // 加载已保存的角色内容，恢复 Mermaid 渲染
+        const res = await fetch(`/api/project/${projectId}/file?name=characters.md`)
+        if (res.ok) {
+          const { content } = await res.json()
+          setStreaming(content)
+        }
+      }
     })
   }, [projectId])
 
-  // 渲染 Mermaid，在 done 且有内容时触发
+  // 渲染 Mermaid
   useEffect(() => {
     if (!done || !streaming) return
     const code = extractMermaidCode(streaming)
     if (!code) { setMermaidError(true); return }
-
-    import('mermaid').then(({ default: mermaid }) => {
-      mermaid.initialize({ startOnLoad: false, theme: 'default', securityLevel: 'strict' })
-      const id = 'mermaid-graph-' + Date.now()
-      mermaid.render(id, code)
-        .then(({ svg }) => setMermaidSvg(svg))
-        .catch((err) => {
-          console.error('Mermaid render error:', err)
-          setMermaidError(true)
-        })
+    renderMermaid(sanitizeMermaid(code)).then(svg => {
+      if (svg) setMermaidSvg(svg)
+      else setMermaidError(true)
     })
   }, [done, streaming])
 
-  // 将 SVG 插入 DOM（使用 ref 避免 React 重渲覆盖）
+  // 将 SVG 插入 DOM（ref 管理，避免 React 重渲覆盖）
   useEffect(() => {
     if (mermaidSvg && mermaidContainerRef.current) {
       mermaidContainerRef.current.innerHTML = mermaidSvg
@@ -90,7 +118,6 @@ export default function CharactersPage({ params }: { params: { projectId: string
                 正在渲染关系图...
               </div>
             )}
-            {/* Mermaid SVG 容器 — 用 ref 管理，避免 React 重渲覆盖 */}
             <div
               ref={mermaidContainerRef}
               className={`bg-white border rounded-lg p-4 overflow-auto ${mermaidSvg ? '' : 'hidden'}`}
