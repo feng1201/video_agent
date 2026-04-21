@@ -3,13 +3,15 @@ export async function streamFromAPI(
   body: object,
   onChunk: (content: string) => void,
   onDone: () => void,
-  onError: (msg: string) => void
+  onError: (msg: string) => void,
+  signal?: AbortSignal
 ): Promise<void> {
   try {
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
+      signal,
     })
     const reader = res.body!.getReader()
     const decoder = new TextDecoder()
@@ -26,7 +28,8 @@ export async function streamFromAPI(
         } catch {}
       }
     }
-  } catch {
+  } catch (e: unknown) {
+    if (e instanceof Error && e.name === 'AbortError') return
     onError('网络错误，请重试')
   }
 }

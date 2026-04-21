@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import StepLayout from '@/components/StepLayout'
 import StreamingText from '@/components/StreamingText'
@@ -9,62 +9,161 @@ export default function EpisodePage({ params }: { params: { projectId: string } 
   const { projectId } = params
   const router = useRouter()
   const [state, setState] = useState<{ completedSteps: string[]; completedEpisodes: number[]; totalEpisodes: number } | null>(null)
-  const [epNum, setEpNum] = useState(1)
+  const [selected, setSelected] = useState<number[]>([])
   const [streaming, setStreaming] = useState('')
-  const [isStreaming, setIsStreaming] = useState(false)
+  const [isRunning, setIsRunning] = useState(false)
+  const [currentEp, setCurrentEp] = useState<number | null>(null)
+  const [progress, setProgress] = useState({ done: 0, total: 0 })
+  const abortRef = useRef(false)
+  const abortCtrlRef = useRef<AbortController | null>(null)
 
   useEffect(() => {
-    fetch(`/api/project/${projectId}/state`).then(r => r.json()).then(s => {
-      setState(s)
-      const next = (s.completedEpisodes?.length ?? 0) + 1
-      setEpNum(Math.min(next, s.totalEpisodes ?? 60))
-    })
+    fetch(`/api/project/${projectId}/state`).then(r => r.json()).then(s => setState(s))
   }, [projectId])
 
-  async function handleGenerate() {
-    setIsStreaming(true)
-    setStreaming('')
-    await streamFromAPI(
-      `/api/project/${projectId}/episode`,
-      { episode: epNum },
-      (c) => setStreaming(prev => prev + c),
-      () => {
-        setIsStreaming(false)
-        fetch(`/api/project/${projectId}/state`).then(r => r.json()).then(s => {
-          setState(s)
-          const next = (s.completedEpisodes?.length ?? 0) + 1
-          setEpNum(Math.min(next, s.totalEpisodes ?? 60))
-        })
-      },
-      (msg) => { setIsStreaming(false); alert(msg) }
+  const total = state?.totalEpisodes ?? 0
+  const completed = state?.completedEpisodes ?? []
+  const allEps = Array.from({ length: total }, (_, i) => i + 1)
+  const undoneEps = allEps.filter(ep => !completed.includes(ep))
+
+  function toggleEp(ep: number) {
+    setSelected(prev =>
+      prev.includes(ep) ? prev.filter(e => e !== ep) : [...prev, ep].sort((a, b) => a - b)
     )
   }
 
-  const completed = state?.completedEpisodes ?? []
+  function selectAll() { setSelected(allEps) }
+  function selectUndone() { setSelected([...undoneEps]) }
+  function selectN(n: number) { setSelected(undoneEps.slice(0, n)) }
+  function clearSel() { setSelected([]) }
+
+  async function handleRun() {
+    if (selected.length === 0) return
+    abortRef.current = false
+    setIsRunning(true)
+    let doneSoFar = 0
+    setProgress({ done: 0, total: selected.length })
+
+    for (const ep of selected) {
+      if (abortRef.current) break
+      setCurrentEp(ep)
+      setStreaming('')
+
+      const ctrl = new AbortController()
+      abortCtrlRef.current = ctrl
+
+      await new Promise<void>(resolve => {
+        streamFromAPI(
+          `/api/project/${projectId}/episode`,
+          { episode: ep },
+          (c) => setStreaming(prev => prev + c),
+          () => { doneSoFar++; setProgress({ done: doneSoFar, total: selected.length }); resolve() },
+          () => resolve(),
+          ctrl.signal
+        )
+      })
+    }
+
+    setIsRunning(false)
+    setCurrentEp(null)
+    fetch(`/api/project/${projectId}/state`).then(r => r.json()).then(s => setState(s))
+  }
+
+  function handleStop() {
+    abortRef.current = true
+    abortCtrlRef.current?.abort()
+  }
 
   return (
     <StepLayout projectId={projectId} currentStep="episode" completedSteps={state?.completedSteps ?? []}
       title="第五步：生成分集剧本" prevStep="outline"
-      description="逐集生成完整剧本，每集包含场景、台词、景别和音乐提示。">
+      description="选择要生成的集数，AI 将按顺序逐集完成。每集包含场景、台词、景别和音乐提示。">
       <div className="space-y-4">
-        {completed.length > 0 && (
-          <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-sm">
-            ✅ 已完成：第 {completed.slice(0, 10).join('、')} 集{completed.length > 10 ? `...共${completed.length}集` : ''}
+
+        {/* Quick select buttons */}
+        <div className="flex flex-wrap gap-2 items-center">
+          <span className="text-sm text-gray-500 font-medium">快速选择：</span>
+          <button onClick={selectUndone} disabled={isRunning}
+            className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-sm font-medium hover:bg-blue-200 disabled:opacity-40">
+            未完成（{undoneEps.length}集）
+          </button>
+          <button onClick={() => selectN(10)} disabled={isRunning || undoneEps.length === 0}
+            className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-sm font-medium hover:bg-blue-200 disabled:opacity-40">
+            前10集
+          </button>
+          <button onClick={() => selectN(20)} disabled={isRunning || undoneEps.length === 0}
+            className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-sm font-medium hover:bg-blue-200 disabled:opacity-40">
+            前20集
+          </button>
+          <button onClick={selectAll} disabled={isRunning}
+            className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-sm font-medium hover:bg-blue-200 disabled:opacity-40">
+            全选（{total}集）
+          </button>
+          <button onClick={clearSel} disabled={isRunning}
+            className="px-3 py-1 bg-gray-100 text-gray-600 rounded-full text-sm font-medium hover:bg-gray-200 disabled:opacity-40">
+            清除
+          </button>
+          <span className="ml-auto text-sm text-gray-500">已选 {selected.length} 集</span>
+        </div>
+
+        {/* Episode checkbox list */}
+        {total > 0 && (
+          <div className="border rounded-lg overflow-y-auto max-h-52 p-2 bg-gray-50">
+            <div className="grid grid-cols-5 sm:grid-cols-8 gap-1">
+              {allEps.map(ep => {
+                const isDone = completed.includes(ep)
+                const isSel = selected.includes(ep)
+                const isCurrent = currentEp === ep
+                return (
+                  <label key={ep}
+                    className={`flex items-center gap-1 px-2 py-1 rounded cursor-pointer text-sm select-none
+                      ${isCurrent ? 'bg-yellow-100 border border-yellow-400' :
+                        isDone ? 'bg-green-50 text-green-700' : 'bg-white hover:bg-blue-50'}
+                      ${isRunning ? 'cursor-default' : ''}`}>
+                    <input type="checkbox" checked={isSel} disabled={isRunning}
+                      onChange={() => toggleEp(ep)}
+                      className="accent-blue-600" />
+                    <span className={isDone ? 'line-through text-green-600' : ''}>
+                      {ep}
+                    </span>
+                    {isDone && <span className="text-green-500 text-xs">✓</span>}
+                  </label>
+                )
+              })}
+            </div>
           </div>
         )}
-        <div className="flex items-center gap-3">
-          <label className="font-semibold text-gray-700">生成第</label>
-          <input type="number" min={1} max={state?.totalEpisodes ?? 100} value={epNum}
-            onChange={e => setEpNum(Number(e.target.value))}
-            className="border rounded-lg px-3 py-2 w-20 text-center font-bold text-lg" />
-          <span className="text-gray-500">集（共 {state?.totalEpisodes ?? '—'} 集）</span>
-        </div>
-        <StreamingText content={streaming} isStreaming={isStreaming} />
+
+        {/* Progress bar */}
+        {isRunning && (
+          <div className="space-y-1">
+            <div className="flex justify-between text-sm text-gray-600">
+              <span>正在生成第 {currentEp} 集</span>
+              <span>{progress.done} / {progress.total} 集完成</span>
+            </div>
+            <div className="w-full bg-gray-200 rounded-full h-2">
+              <div className="bg-blue-600 h-2 rounded-full transition-all"
+                style={{ width: `${progress.total > 0 ? (progress.done / progress.total) * 100 : 0}%` }} />
+            </div>
+          </div>
+        )}
+
+        {/* Streaming output */}
+        <StreamingText content={streaming} isStreaming={isRunning && currentEp !== null} />
+
+        {/* Action buttons */}
         <div className="flex gap-3">
-          <button onClick={handleGenerate} disabled={isStreaming}
-            className="flex-1 bg-blue-600 text-white py-3 rounded-lg font-bold disabled:opacity-50">
-            {isStreaming ? `🤖 正在写第${epNum}集...` : `✍️ 生成第${epNum}集`}
-          </button>
+          {isRunning ? (
+            <button onClick={handleStop}
+              className="flex-1 bg-red-500 text-white py-3 rounded-lg font-bold text-lg hover:bg-red-600">
+              ⏹ 停止生成
+            </button>
+          ) : (
+            <button onClick={handleRun} disabled={selected.length === 0}
+              className="flex-1 bg-blue-600 text-white py-3 rounded-lg font-bold text-lg disabled:opacity-50">
+              ✍️ 生成选中的 {selected.length} 集
+            </button>
+          )}
           {completed.length >= 1 && (
             <button onClick={() => router.push(`/project/${projectId}/review`)}
               className="flex-1 bg-green-600 text-white py-3 rounded-lg font-bold">
@@ -72,6 +171,12 @@ export default function EpisodePage({ params }: { params: { projectId: string } 
             </button>
           )}
         </div>
+
+        {completed.length > 0 && (
+          <div className="text-xs text-gray-400 text-center">
+            已完成 {completed.length}/{total} 集
+          </div>
+        )}
       </div>
     </StepLayout>
   )
