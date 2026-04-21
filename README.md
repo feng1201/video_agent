@@ -26,7 +26,7 @@ DNS 记录已配置，等待传播（推测 24-48 小时）后可通过域名访
 http://shanghaihope.xin
 https://shanghaihope.xin   ← DNS 生效后运行 bash /root/test/dep/ssl.sh 开启 HTTPS
 ```
-(届时试试，可能需要单独配置阿里云的服务器？）
+(届时试试，可能需要单独配置阿里云的服务器？貌似阿里云必须要备案后才可以通过80/80端口访问，届时再研究下）
 
 ### 方式三：本地开发运行
 
